@@ -1,0 +1,83 @@
+name: CI/CD Laravel — Manual Deploy
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+
+jobs:
+    # ─────────────────────────────────────────
+    # Job 1: Jalankan unit test
+    # ─────────────────────────────────────────
+    test:
+        name: Run Unit Tests
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout kode
+              uses: actions/checkout@v4
+
+            - name: Setup PHP 8.2
+              uses: shivammathur/setup-php@v2
+              with:
+                  php-version: "8.2"
+                  extensions: mbstring, bcmath, sqlite3
+                  coverage: none
+
+            - name: Cache Composer dependencies
+              uses: actions/cache@v4
+              with:
+                  path: vendor
+                  key: ${{ runner.os }}-composer-${{ hashFiles('composer.lock') }}
+                  restore-keys: ${{ runner.os }}-composer-
+
+            - name: Install dependencies
+              run: composer install --no-interaction --prefer-dist --no-progress
+
+            - name: Copy .env untuk testing
+              run: cp .env.example .env && php artisan key:generate
+
+            - name: Jalankan unit test
+              run: php artisan test
+
+    # ─────────────────────────────────────────
+    # Job 2: Deploy ke VPS (hanya jika test lulus
+    #         dan hanya dari branch main)
+    # ─────────────────────────────────────────
+    deploy:
+        name: Deploy ke VPS
+        needs: test
+        runs-on: ubuntu-latest
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+        steps:
+            - name: Deploy via SSH
+              uses: appleboy/ssh-action@v1.2.0
+              with:
+                  host: ${{ secrets.SSH_HOST }}
+                  username: ${{ secrets.SSH_USER }}
+                  key: ${{ secrets.SSH_PRIVATE_KEY }}
+                  script: |
+                      set -e
+
+                      cd /var/www/cicd-laravel
+
+                      echo ">>> Menarik kode terbaru dari GitHub..."
+                      git pull origin main
+
+                      echo ">>> Install/update Composer dependencies..."
+                      composer install --no-dev --optimize-autoloader --no-interaction
+
+                      echo ">>> Jalankan migration database..."
+                      php artisan migrate --force
+
+                      echo ">>> Bersihkan dan rebuild cache..."
+                      php artisan config:cache
+                      php artisan route:cache
+                      php artisan view:cache
+
+                      echo ">>> Set ulang permission storage..."
+                      chmod -R 775 storage bootstrap/cache
+
+                      echo ">>> Deploy selesai!"
