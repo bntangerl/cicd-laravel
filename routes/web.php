@@ -13,5 +13,6 @@ Route::get('/hitung', function (Calculator $calc) {
     return response()->json([
         'operasi' => '10 + 5',
         'hasil'   => $hasil,
+        'pesan'   => 'Halo dari CI/CD',
     ]);
 });
